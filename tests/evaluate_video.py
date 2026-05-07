@@ -36,6 +36,8 @@ _script_dir = Path(__file__).resolve().parent
 _project_root = _script_dir.parent
 sys.path.insert(0, str(_project_root))
 
+from core.vision_utils import draw_annotations
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
@@ -62,27 +64,20 @@ def annotate_frame(cv2_mod, frame, perception, decision, timestamp_sec: float):
 
     # Bounding box or fallback highlight
     if perception.defect.lower() not in ("none", "unknown"):
-        if perception.bbox and len(perception.bbox) == 4:
-            x1, y1, x2, y2 = [max(0, v) for v in perception.bbox]
-            x2, y2 = min(w, x2), min(h, y2)
-            cv2_mod.rectangle(out, (x1, y1), (x2, y2), bgr, 3)
-        else:
-            mx, my = w // 6, h // 6
-            clen = min(w, h) // 8
-            corners = [
-                ((mx, my), (mx + clen, my)), ((mx, my), (mx, my + clen)),
-                ((w - mx, my), (w - mx - clen, my)), ((w - mx, my), (w - mx, my + clen)),
-                ((mx, h - my), (mx + clen, h - my)), ((mx, h - my), (mx, h - my - clen)),
-                ((w - mx, h - my), (w - mx - clen, h - my)), ((w - mx, h - my), (w - mx, h - my - clen)),
-            ]
-            for p1, p2 in corners:
-                cv2_mod.line(out, p1, p2, bgr, 3)
+        out = draw_annotations(out, getattr(perception, 'bbox_2d', None), perception.defect)
+    else:
+        out = draw_annotations(out, None, "none")
 
     # Top-left: severity label
     sev_tag = f"[{decision.severity.upper()}] {perception.defect}"
     (tw, th), _ = cv2_mod.getTextSize(sev_tag, cv2_mod.FONT_HERSHEY_SIMPLEX, 0.65, 2)
-    cv2_mod.rectangle(out, (4, 4), (tw + 12, th + 14), bgr, -1)
-    cv2_mod.putText(out, sev_tag, (8, th + 8), cv2_mod.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+    
+    # Task B6: Global Header Transparency
+    overlay = out.copy()
+    cv2_mod.rectangle(overlay, (4, 4), (tw + 20, th + 16), (0, 0, 0), -1)
+    cv2_mod.addWeighted(overlay, 0.6, out, 0.4, 0, out)
+    cv2_mod.rectangle(out, (4, 4), (10, th + 16), bgr, -1) # left color ribbon
+    cv2_mod.putText(out, sev_tag, (14, th + 10), cv2_mod.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
 
     # Bottom bar: action text
     action_short = decision.action[:90]

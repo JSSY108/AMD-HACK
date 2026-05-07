@@ -17,6 +17,7 @@ from core.perception import PerceptionEngine
 from core.rag import KnowledgeStore
 from core.reasoning import ReasoningEngine
 from core.event_logic import EventManager
+from core.vision_utils import draw_annotations
 
 # CSS from Tasks F3 & F9 & F10 & F11 & F12 & F13
 css = """
@@ -27,11 +28,45 @@ body, .gradio-container {
     font-family: monospace !important;
 }
 .priority-action {
-    font-size: 1.1rem !important;
+    font-size: 1.2rem !important;
     font-weight: bold !important;
-    min-height: 200px !important;
-    max-height: 200px !important;
+    min-height: 180px !important;
+    max-height: 180px !important;
     overflow-y: auto !important;
+    padding: 15px !important;
+    border: 1px solid #3f444d !important;
+    background-color: #111418 !important;
+    border-radius: 8px !important;
+}
+/* Aggressively prevent word splitting */
+.priority-action * {
+    word-break: keep-all !important;
+    word-wrap: normal !important;
+    overflow-wrap: normal !important;
+    hyphens: none !important;
+    line-height: 1.6 !important;
+}
+.priority-action span {
+    display: inline-block !important;
+    white-space: pre-wrap !important;
+}
+/* Ensure the highlighted segments look premium */
+.priority-action .category-label {
+    background-color: #e11d48 !important; /* Industrial red */
+    color: white !important;
+    padding: 2px 8px !important;
+    border-radius: 4px !important;
+    font-size: 0.75rem !important;
+    margin: 0 4px !important;
+    display: inline-block !important;
+    vertical-align: middle !important;
+}
+.priority-action .text-span {
+    background-color: #1e293b !important;
+    color: #f8fafc !important;
+    padding: 4px 8px !important;
+    border-radius: 4px !important;
+    display: inline-block !important;
 }
 .rationale-text textarea {
     font-size: 13px !important;
@@ -88,26 +123,19 @@ def annotate_frame(cv2_mod, frame, perception, decision, timestamp_sec: float):
     bgr = (rgb[2], rgb[1], rgb[0])
 
     if perception.defect.lower() not in ("none", "unknown"):
-        if perception.bbox and len(perception.bbox) == 4:
-            x1, y1, x2, y2 = [max(0, v) for v in perception.bbox]
-            x2, y2 = min(w, x2), min(h, y2)
-            cv2_mod.rectangle(out, (x1, y1), (x2, y2), bgr, 3)
-        else:
-            mx, my = w // 6, h // 6
-            clen = min(w, h) // 8
-            corners = [
-                ((mx, my), (mx + clen, my)), ((mx, my), (mx, my + clen)),
-                ((w - mx, my), (w - mx - clen, my)), ((w - mx, my), (w - mx, my + clen)),
-                ((mx, h - my), (mx + clen, h - my)), ((mx, h - my), (mx, h - my - clen)),
-                ((w - mx, h - my), (w - mx - clen, h - my)), ((w - mx, h - my), (w - mx, h - my - clen)),
-            ]
-            for p1, p2 in corners:
-                cv2_mod.line(out, p1, p2, bgr, 3)
+        out = draw_annotations(out, getattr(perception, 'bbox_2d', None), perception.defect)
+    else:
+        out = draw_annotations(out, None, "none")
 
     sev_tag = f"[{decision.severity.upper()}] {perception.defect}"
     (tw, th), _ = cv2_mod.getTextSize(sev_tag, cv2_mod.FONT_HERSHEY_SIMPLEX, 0.65, 2)
-    cv2_mod.rectangle(out, (4, 4), (tw + 12, th + 14), bgr, -1)
-    cv2_mod.putText(out, sev_tag, (8, th + 8), cv2_mod.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+    
+    # Task B6: Global Header Transparency
+    overlay = out.copy()
+    cv2_mod.rectangle(overlay, (4, 4), (tw + 20, th + 16), (0, 0, 0), -1)
+    cv2_mod.addWeighted(overlay, 0.6, out, 0.4, 0, out)
+    cv2_mod.rectangle(out, (4, 4), (10, th + 16), bgr, -1) # left color ribbon
+    cv2_mod.putText(out, sev_tag, (14, th + 10), cv2_mod.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
 
     action_short = decision.action[:90]
     bar_h = 40
@@ -116,8 +144,10 @@ def annotate_frame(cv2_mod, frame, perception, decision, timestamp_sec: float):
     cv2_mod.addWeighted(overlay, 0.8, out, 0.2, 0, out)
     cv2_mod.putText(out, action_short, (8, h - 12), cv2_mod.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-    ts_str = f"t={timestamp_sec:.1f}s"
-    cv2_mod.putText(out, ts_str, (w - 110, 24), cv2_mod.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1)
+    ts_min = int(timestamp_sec // 60)
+    ts_sec = int(timestamp_sec % 60)
+    ts_str = f"{ts_min:02d}:{ts_sec:02d}"
+    cv2_mod.putText(out, ts_str, (w - 70, 24), cv2_mod.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1)
 
     return cv2_mod.cvtColor(out, cv2_mod.COLOR_BGR2RGB)
 
@@ -129,15 +159,21 @@ def run_inspection():
 
     print(f"Initializing with video {video_path}")
     
+    print("DEBUG: Initializing models...", flush=True)
     perception_engine = PerceptionEngine(backend="vllm")
     knowledge_store = KnowledgeStore()
+    print("DEBUG: Loading knowledge store...", flush=True)
     rag_loaded = knowledge_store.load()
     reasoning_engine = ReasoningEngine()
+    print(f"DEBUG: Knowledge store loaded: {rag_loaded}", flush=True)
 
+    print(f"DEBUG: Opening video {video_path}...", flush=True)
     grabber = FrameGrabber(source=video_path)
     if not grabber.open():
+        print("DEBUG: Video open failed!", flush=True)
         yield None, "🔴 ERROR: Video not found", [], {}, "", "", "{}", []
         return
+    print("DEBUG: Video opened successfully.", flush=True)
 
     selector = FrameSelector()
     event_manager = EventManager(cooldown_seconds=5.0)
@@ -154,19 +190,24 @@ def run_inspection():
     latched_time = 0.0
     latched_perception = None
     latched_sop = []
+    
+    # Task F16: Frame Dropper for Real-Time
+    next_inference_time = 0.0
 
     for timestamp_sec, frame in grabber.yield_frames():
         while state.paused:
             time.sleep(0.2)
             
-        now = time.monotonic()
+        # Task F16: Skip frames until we reach the next 1.0s mark in video time
+        if timestamp_sec < next_inference_time:
+            continue
+
         selected = selector.select(timestamp_sec, frame)
         if selected is None:
             continue
-        if (now - last_inference_time) < INFERENCE_INTERVAL:
-            continue
 
-        last_inference_time = now
+        # Schedule next analysis exactly 1.0s later in video time
+        next_inference_time = timestamp_sec + 1.0
         loop_start = time.perf_counter()
 
         t_vis_start = time.perf_counter()
@@ -238,11 +279,17 @@ def run_inspection():
         }
         telemetry_json = json.dumps(telemetry_dict, indent=2)
 
-        # F7: Add to Event Timeline
+        # Task F18: MM:SS Formatting
+        ts_min = int(timestamp_sec // 60)
+        ts_sec = int(timestamp_sec % 60)
+        ts_fmt = f"{ts_min:02d}:{ts_sec:02d}"
+        
+        # Task F7: Add to Event Timeline
         thumb = cv2.resize(annotated_frame, (160, 120))
-        caption = f"{timestamp_sec:.1f}s | {latched_decision.severity.upper()}"
+        caption = f"{ts_fmt} | {latched_decision.severity.upper()}"
         
         history_item = {
+            "timestamp": timestamp_sec,
             "thumb": thumb,
             "caption": caption,
             "annotated_frame": annotated_frame,
@@ -253,9 +300,19 @@ def run_inspection():
             "sop_markdown": sop_markdown,
             "telemetry_json": telemetry_json
         }
-        state.event_history.append(history_item)
-        if len(state.event_history) > 100:
-            state.event_history.pop(0)
+        
+        # Task F17: Timeline Deduplication
+        found_dup = False
+        for i, item in enumerate(state.event_history):
+            if abs(item["timestamp"] - timestamp_sec) < 0.5:
+                state.event_history[i] = history_item
+                found_dup = True
+                break
+        
+        if not found_dup:
+            state.event_history.append(history_item)
+            if len(state.event_history) > 50:
+                state.event_history.pop(0)
             
         # F14: Auto-scroll timeline (reverse order)
         gallery_data = [(e["thumb"], e["caption"]) for e in reversed(state.event_history)]
@@ -351,4 +408,9 @@ with gr.Blocks() as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860, css=css, theme=gr.themes.Monochrome())
+    demo.queue(default_concurrency_limit=5).launch(
+        server_name="0.0.0.0", 
+        server_port=7860, 
+        css=css, 
+        theme=gr.themes.Monochrome()
+    )

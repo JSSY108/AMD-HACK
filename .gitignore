@@ -18,6 +18,7 @@ ENV/
 # Data/Output
 eval_output/
 eval_output_foundry/
+eval_output_test/
 frame_archive/
 
 # OS
@@ -28,3 +29,4 @@ frame_archive/
 .bash_history
 .digitalocean_passwords
 amdgpu-install_*.deb*
+ui/app.py_temp

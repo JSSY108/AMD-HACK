@@ -30,13 +30,14 @@ class PerceptionResult(BaseModel):
     severity_hint: Literal["low", "medium", "high"]
     visual_evidence: str
     confidence: Literal["low", "medium", "high"]
-    bbox: Optional[list[int]] = None  # [x1, y1, x2, y2]
+    bbox_2d: Optional[list[int]] = None  # Add this
 
 
 # Task 1: Updated system prompt — grounded observation, no cause guessing
 PERCEPTION_SYSTEM_PROMPT = """You are an expert industrial visual inspector.
 
 Analyze the image and identify any visible defects or anomalies.
+Locate the defect in the image and return the coordinates in the format [x1, y1, x2, y2]. If multiple hazards exist, prioritize the most critical one.
 
 IMPORTANT:
 - Only report what is visually observable.
@@ -48,7 +49,8 @@ Return ONLY a JSON object:
   "defect": "...",
   "severity_hint": "low|medium|high",
   "visual_evidence": "...",
-  "confidence": "low|medium|high"
+  "confidence": "low|medium|high",
+  "bbox_2d": [x1, y1, x2, y2]
 }
 
 If no defect is visible:
@@ -56,6 +58,7 @@ If no defect is visible:
 - severity_hint = "low"
 - visual_evidence = "No visible anomalies detected"
 - confidence = "high"
+- bbox_2d = null
 """
 
 # JSON schema for vLLM guided decoding
@@ -66,8 +69,14 @@ PERCEPTION_JSON_SCHEMA = {
         "severity_hint": {"type": "string", "enum": ["low", "medium", "high"]},
         "visual_evidence": {"type": "string"},
         "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
+        "bbox_2d": {
+            "type": ["array", "null"],
+            "items": {"type": "integer"},
+            "minItems": 4,
+            "maxItems": 4
+        }
     },
-    "required": ["defect", "severity_hint", "visual_evidence", "confidence"],
+    "required": ["defect", "severity_hint", "visual_evidence", "confidence", "bbox_2d"],
 }
 
 
