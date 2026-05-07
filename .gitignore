@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+.env
+
+# Cache
+.cache/
+
+# Gemini/Antigravity specific
+.gemini/
+.antigravity-server/
+
+# Data/Output
+eval_output/
+eval_output_foundry/
+frame_archive/
+
+# OS
+.DS_Store
+
+# Misc
+.wget-hsts
+.bash_history
+.digitalocean_passwords
+amdgpu-install_*.deb*
